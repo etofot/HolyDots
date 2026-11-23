@@ -1,0 +1,425 @@
+# Heat Rush 2.0 - Supabase Configuration & Edge Functions
+
+## Supabase Backend & Database Schema
+
+### File: `supabase/migrations/00001_001_init.sql`
+```sql
+
+CREATE TYPE public.user_role AS ENUM ('user', 'admin');
+CREATE TYPE order_status AS ENUM ('pending', 'completed', 'cancelled', 'refunded');
+
+CREATE TABLE public.profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email text,
+  phone text,
+  username text,
+  role public.user_role NOT NULL DEFAULT 'user',
+  heat_points integer NOT NULL DEFAULT 0,
+  crystals integer NOT NULL DEFAULT 0,
+  best_wave integer NOT NULL DEFAULT 0,
+  best_score integer NOT NULL DEFAULT 0,
+  total_games integer NOT NULL DEFAULT 0,
+  upgrades jsonb NOT NULL DEFAULT '{"start_temp": 0, "heat_speed": 0, "cooling_resist": 0, "fuel_cap": 0, "blast_radius": 0}'::jsonb,
+  skins jsonb NOT NULL DEFAULT '["default"]'::jsonb,
+  current_skin text NOT NULL DEFAULT 'default',
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE public.leaderboards (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES public.profiles(id) ON DELETE CASCADE,
+  score integer NOT NULL,
+  wave integer NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE public.orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  items jsonb NOT NULL,
+  total_amount numeric(12,2) NOT NULL,
+  currency text NOT NULL DEFAULT 'usd',
+  status order_status NOT NULL DEFAULT 'pending'::order_status,
+  stripe_session_id text UNIQUE,
+  stripe_payment_intent_id text,
+  customer_email text,
+  customer_name text,
+  completed_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- Handle new user registration sync
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  user_count int;
+BEGIN
+  SELECT COUNT(*) INTO user_count FROM profiles;
+  INSERT INTO public.profiles (id, email, phone, role)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    NEW.phone,
+    CASE WHEN user_count = 0 THEN 'admin'::public.user_role ELSE 'user'::public.user_role END
+  );
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_user();
+
+-- Helper function for roles
+CREATE OR REPLACE FUNCTION public.has_role(uid uuid, role_name text)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.profiles p
+    WHERE p.id = uid AND p.role = role_name::public.user_role
+  );
+$$;
+
+-- RLS Setup
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.leaderboards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+
+-- Profiles Policies
+CREATE POLICY "Admins have full access to profiles" ON public.profiles
+  FOR ALL TO authenticated USING (has_role(auth.uid(), 'admin'));
+
+CREATE POLICY "Users can view their own profile" ON public.profiles
+  FOR SELECT TO authenticated USING (auth.uid() = id);
+
+CREATE POLICY "Users can update their own profile" ON public.profiles
+  FOR UPDATE TO authenticated USING (auth.uid() = id)
+  WITH CHECK (
+      auth.uid() = id AND
+      role = (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid())
+  );
+
+CREATE VIEW public.public_profiles AS
+  SELECT id, username, best_score, best_wave, role FROM public.profiles;
+
+-- Leaderboards Policies
+CREATE POLICY "Anyone can read leaderboards" ON public.leaderboards
+  FOR SELECT USING (true);
+
+CREATE POLICY "Users can insert their own scores" ON public.leaderboards
+  FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Admins can manage leaderboards" ON public.leaderboards
+  FOR ALL TO authenticated USING (has_role(auth.uid(), 'admin'));
+
+-- Orders Policies
+CREATE POLICY "Users can view own orders" ON public.orders
+  FOR SELECT TO authenticated USING (auth.uid() = user_id);
+
+CREATE POLICY "Service role can manage orders" ON public.orders
+  FOR ALL USING (auth.jwt()->>'role' = 'service_role');
+
+```
+
+### File: `supabase/functions/create_stripe_checkout/index.ts`
+```ts
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import Stripe from "npm:stripe@19.1.0";
+
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
+const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const supabase = createClient(supabaseUrl!, supabaseKey!);
+
+const successUrlPath = '/payment-success?session_id={CHECKOUT_SESSION_ID}';
+const cancelUrlPath = '/shop';
+
+const corsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+interface OrderItem {
+    name: string;
+    price: number;
+    quantity: number;
+    image_url?: string;
+    type: 'crystals' | 'skin'; // To know what to unlock
+    sku: string;
+}
+
+interface CheckoutRequest {
+    items: OrderItem[];
+    currency?: string;
+    payment_method_types?: string[];
+}
+
+function ok(data: any): Response {
+    return new Response(JSON.stringify({ code: "SUCCESS", message: "Success", data }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+    });
+}
+
+function fail(msg: string, code = 400): Response {
+    return new Response(JSON.stringify({ code: "FAIL", message: msg }), {
+        status: code,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+    });
+}
+
+function validateCheckoutRequest(request: CheckoutRequest): void {
+    if (!request.items?.length) throw new Error("Items cannot be empty");
+    for (const item of request.items) {
+        if (!item.name || item.price <= 0 || item.quantity <= 0) throw new Error("Invalid item info");
+    }
+}
+
+function processOrderItems(items: OrderItem[]) {
+    const formattedItems = items.map(item => ({
+        name: item.name.trim(),
+        price: Math.round(item.price * 100),
+        quantity: item.quantity,
+        image_url: item.image_url?.trim() || "",
+        type: item.type,
+        sku: item.sku
+    }));
+    const totalAmount = formattedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    return { formattedItems, totalAmount };
+}
+
+async function createCheckoutSession(
+    stripe: Stripe,
+    userId: string | null,
+    items: OrderItem[],
+    currency: string,
+    paymentMethods: string[],
+    origin: string
+) {
+    const { formattedItems, totalAmount } = processOrderItems(items);
+
+    const { data: order, error } = await supabase
+        .from("orders")
+        .insert({
+            user_id: userId,
+            items: formattedItems,
+            total_amount: totalAmount,
+            currency: currency.toLowerCase(),
+            status: "pending",
+        })
+        .select()
+        .single();
+
+    if (error) throw new Error(`Create order failed: ${error.message}`);
+
+    const session = await stripe.checkout.sessions.create({
+        line_items: items.map(item => ({
+            price_data: {
+                currency: currency.toLowerCase(),
+                product_data: {
+                    name: item.name,
+                    images: item.image_url ? [item.image_url] : [],
+                },
+                unit_amount: Math.round(item.price * 100),
+            },
+            quantity: item.quantity,
+        })),
+        mode: "payment",
+        success_url: `${origin}${successUrlPath}`,
+        cancel_url: `${origin}${cancelUrlPath}`,
+        payment_method_types: paymentMethods,
+        metadata: {
+            order_id: order.id,
+            user_id: userId || "",
+        },
+    });
+
+    await supabase
+        .from("orders")
+        .update({
+            stripe_session_id: session.id,
+            stripe_payment_intent_id: session.payment_intent as string,
+        })
+        .eq("id", order.id);
+
+    return { order, session };
+}
+
+Deno.serve(async (req) => {
+    try {
+        if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+        if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+
+        const request = await req.json();
+        validateCheckoutRequest(request);
+
+        const authHeader = req.headers.get("Authorization");
+        const token = authHeader?.replace("Bearer ", "");
+        const { data: { user } } = token
+            ? await supabase.auth.getUser(token)
+            : { data: { user: null } };
+
+        const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
+        if (!stripeSecretKey) throw new Error("STRIPE_SECRET_KEY not configured");
+
+        const stripe = new Stripe(stripeSecretKey, { apiVersion: "2025-08-27.basil" as any });
+        const origin = req.headers.get("origin") || "";
+        const { order, session } = await createCheckoutSession(
+            stripe,
+            user?.id || null,
+            request.items,
+            request.currency || 'usd',
+            request.payment_method_types || ['card'],
+            origin
+        );
+
+        return ok({ url: session.url, sessionId: session.id, orderId: order.id });
+    } catch (error) {
+        return fail(error instanceof Error ? error.message : "Payment processing failed", 500);
+    }
+});
+```
+
+### File: `supabase/functions/verify_stripe_payment/index.ts`
+```ts
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import Stripe from "npm:stripe@19.1.0";
+
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
+const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const supabase = createClient(supabaseUrl!, supabaseKey!);
+
+const corsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function ok(data: any): Response {
+    return new Response(JSON.stringify({ code: "SUCCESS", message: "Success", data }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+    });
+}
+
+function fail(msg: string, code = 400): Response {
+    return new Response(JSON.stringify({ code: "FAIL", message: msg }), {
+        status: code,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+    });
+}
+
+async function updateOrderStatusAndGrantRewards(
+    sessionId: string,
+    session: Stripe.Checkout.Session
+): Promise<boolean> {
+    const { data: order, error: fetchError } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("stripe_session_id", sessionId)
+        .single();
+
+    if (fetchError || !order) {
+        console.error("Order fetch failed:", fetchError);
+        return false;
+    }
+
+    if (order.status === "completed") return true;
+
+    if (order.status !== "pending") {
+        console.error(`Order status is ${order.status}, cannot complete`);
+        return false;
+    }
+
+    const { error } = await supabase
+        .from("orders")
+        .update({
+            status: "completed",
+            completed_at: new Date().toISOString(),
+            customer_email: session.customer_details?.email,
+            customer_name: session.customer_details?.name,
+            stripe_payment_intent_id: session.payment_intent as string,
+        })
+        .eq("id", order.id)
+        .eq("status", "pending");
+
+    if (error) {
+        console.error("Order update failed:", error);
+        return false;
+    }
+
+    // Grant rewards
+    if (order.user_id && order.items && Array.isArray(order.items)) {
+        const { data: profile } = await supabase.from('profiles').select('*').eq('id', order.user_id).single();
+        if (profile) {
+            let newCrystals = profile.crystals || 0;
+            let newSkins = Array.isArray(profile.skins) ? [...profile.skins] : ['default'];
+            
+            for (const item of order.items) {
+                if (item.type === 'crystals') {
+                    if (item.sku === 'crystals_100') newCrystals += 100;
+                    else if (item.sku === 'crystals_500') newCrystals += 500;
+                    else if (item.sku === 'crystals_2000') newCrystals += 2000;
+                } else if (item.type === 'skin') {
+                    if (!newSkins.includes(item.sku)) {
+                        newSkins.push(item.sku);
+                    }
+                } else if (item.sku === 'no_ads') {
+                    if (!newSkins.includes('no_ads')) {
+                        newSkins.push('no_ads'); // Just use skins array to track "no_ads" ownership for simplicity
+                    }
+                }
+            }
+
+            await supabase.from('profiles').update({
+                crystals: newCrystals,
+                skins: newSkins
+            }).eq('id', order.user_id);
+        }
+    }
+
+    return true;
+}
+
+Deno.serve(async (req) => {
+    try {
+        if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+        const { sessionId } = await req.json();
+        if (!sessionId) throw new Error("Missing session_id parameter");
+
+        const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
+        if (!stripeSecretKey) throw new Error("STRIPE_SECRET_KEY not configured");
+
+        const stripe = new Stripe(stripeSecretKey, { apiVersion: "2025-08-27.basil" as any });
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        if (session.payment_status !== "paid") {
+            return ok({ verified: false, status: session.payment_status, sessionId: session.id });
+        }
+
+        const orderUpdated = await updateOrderStatusAndGrantRewards(sessionId, session);
+
+        return ok({
+            verified: true,
+            status: "paid",
+            sessionId: session.id,
+            paymentIntentId: session.payment_intent,
+            amount: session.amount_total,
+            currency: session.currency,
+            customerEmail: session.customer_details?.email,
+            customerName: session.customer_details?.name,
+            orderUpdated,
+        });
+    } catch (error) {
+        console.error("Verification failed:", error);
+        return fail(error instanceof Error ? error.message : "Verification failed", 500);
+    }
+});
+```

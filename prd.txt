@@ -1,0 +1,1021 @@
+# Requirements Document
+
+## 1. Application Overview
+
+### 1.1 Application Name
+Heat Rush 2.0
+
+### 1.2 Application Description
+Heat Rush 2.0 is a mobile arcade game combining match-3 mechanics with temperature-based strategy and spatial puzzle elements. Players control a 12×24 grid in portrait mode divided into two zones: a preparation zone (rows 1-8) where players can change cube colors and move cubes both horizontally and vertically to form matching patterns without triggering matches, and an automatic zone (rows 9-24) where cubes move upward automatically and matches trigger when aligned. Cubes spawn at the bottom and move upward. Players tap to cycle colors and swipe in any direction to reposition cubes within the preparation zone. Once a complete figure (3+ connected cubes of same color) crosses the separator line into row 9, it accelerates to 2× speed and matches can trigger. Rapid tapping (8 consecutive taps) heats a cube to red, making it a universal wildcard. Flying cubes move horizontally across the upper zone, creating dynamic matching opportunities. The game features enhanced visual effects, gradient materials, grid overlay, reduced screen shake, and progressive difficulty systems.
+
+## 2. Users and Usage Scenarios
+
+### 2.1 Target Users
+- Mobile gamers seeking quick match-3 arcade experiences with spatial puzzle elements
+- Players who enjoy color-matching puzzles with strategic depth and positioning mechanics
+- Casual gamers looking for 30-second to 10-minute sessions
+- Competitive players interested in leaderboards and high scores
+
+### 2.2 Core Usage Scenarios
+- Quick micro-sessions during commutes or breaks (30-60 seconds)
+- Medium sessions for skill improvement and combo practice (3-5 minutes)
+- Extended sessions for record-chasing and achievement hunting (10+ minutes)
+- Daily engagement through rewards and leaderboard competition
+
+## 3. Page Structure and Functional Description
+
+### 3.1 Overall Structure
+```
+Heat Rush 2.0
+├── Splash Screen
+├── Main Menu
+│   ├── Play Button
+│   ├── Shop
+│   ├── Settings
+│   ├── Leaderboards
+│   └── Daily Reward Calendar
+├── Game Screen
+│   ├── Game Grid (12×24 with visible grid lines and zone separator)
+│   ├── HUD (Score, Wave, Combo Counter)
+│   └── Pause Menu
+├── Game Over Screen
+│   ├── Final Statistics
+│   ├── Restart Button
+│   ├── Continue Option (Ad/Crystals)
+│   └── Return to Menu
+└── Shop Screen
+    ├── Upgrades Tab
+    ├── Skins Tab
+    └── Crystal Packages
+```
+
+### 3.2 Splash Screen
+**Purpose**: Brand introduction and loading
+
+**Elements**:
+- Heat Rush logo with color-cycling animation
+- 2-second duration
+- Auto-transition to Main Menu
+
+### 3.3 Main Menu
+**Purpose**: Navigation hub and daily engagement
+
+**Elements**:
+- Animated background showing bot gameplay demo
+- Play button (primary CTA)
+- Shop button (upgrades, skins, crystals)
+- Settings button (audio, vibration, language)
+- Leaderboards button (daily, weekly, all-time)
+- Daily reward calendar (7-day progressive rewards)
+
+**Functionality**:
+- Display player's best wave and score
+- Show current crystal and match point balance
+- Highlight unclaimed daily rewards
+- Background demo runs continuously
+
+### 3.4 Game Screen
+**Purpose**: Core gameplay experience
+
+**Layout**:
+- 12×24 grid occupying central screen area with visible thin grid lines on dark background
+- Grid divided into two zones:
+  - Preparation Zone: Rows 1-8 (y=1 to y=8)
+  - Automatic Zone: Rows 9-24 (y=9 to y=24)
+- Horizontal separator line between row 8 and row 9 (bright yellow, semi-transparent, 2-pixel thickness)
+- Top HUD: Current wave, score, combo counter
+- Bottom area: Cube spawn zone (y=0, x=1-12)
+- Preparation zone: Player can change colors and move cubes horizontally and vertically (y=1-8)
+- Automatic zone: Cubes move upward automatically and matches trigger (y=9-24)
+- Upper area: Flying cube zone (y=19-23)
+- Top boundary: y=24 (cubes stop and accumulate here)
+- Pause button in top corner
+
+**Visual Design**:
+- Grid lines: Thin, semi-transparent white lines (opacity 0.15) forming cell boundaries
+- Zone separator: Bright yellow horizontal line at y=8/y=9 boundary (opacity 0.6, 2-pixel thickness)
+- Background: Dark gradient (deep blue to black)
+- Cube materials: Gradient-based with smooth color transitions, glossy finish
+- Color palette:
+  - Yellow: Gradient from bright yellow (#FFD700) to golden orange (#FFA500)
+  - Blue: Gradient from cyan (#00CED1) to deep blue (#1E90FF)
+  - Green: Gradient from lime (#32CD32) to emerald (#50C878)
+  - White: Gradient from pure white (#FFFFFF) to light gray (#E0E0E0)
+  - Red: Gradient from bright red (#FF4500) to deep crimson (#DC143C)
+
+**Core Mechanics**:
+
+**Cube System**:
+- Cubes spawn randomly at y=0 across x-positions 1-12
+- Each cube spawns in a specific x-position and moves upward in that vertical lane
+- Spawn interval: 500ms at game start, decreasing to 200ms by wave 10
+- Move upward one cell every 1200ms (base speed)
+- Four base colors: Yellow, Blue, Green, White
+- Color distribution: 25% each color on spawn
+- Maximum 288 cubes can exist on grid (12 columns × 24 rows)
+- Cube appearance: Gradient material with subtle glow effect, rounded edges
+
+**Zone System**:
+- Preparation Zone (y=1 to y=8):
+  - Player can tap cubes to change colors
+  - Player can swipe cubes horizontally to move them left or right
+  - Player can swipe cubes vertically to move them up or down
+  - Cubes continue moving upward automatically while in this zone
+  - Matches do NOT trigger in this zone (no cube removal)
+  - This is a figure preparation area for strategic positioning
+- Automatic Zone (y=9 to y=24):
+  - Cubes move upward automatically
+  - No player interaction allowed (taps and swipes ignored)
+  - Matches trigger when 3+ same-colored cubes align
+  - Matched cubes explode and are removed
+- Zone transition:
+  - When a complete figure (3+ connected same-colored cubes) fully crosses from y=8 to y=9, it accelerates to 2× speed
+  - A figure is considered complete when all cubes are edge-connected (not diagonal) and surrounded by empty cells or diagonally adjacent cubes
+  - Acceleration only occurs when the last cube of the figure crosses the separator line
+  - Visual feedback: Brief flash effect when figure crosses separator line
+  - Individual cubes or incomplete figures do not accelerate
+
+**Color Cycling Mechanic (Preparation Zone Only)**:
+- Single tap on cube in y=1-8: Cycle to next color in sequence (Yellow → Blue → Green → White → Yellow)
+- Color change is instant with smooth gradient transition animation
+- No limit on color changes per cube
+- Visual feedback: Brief glow pulse effect on color change
+- Taps on cubes in y=9-24 are ignored
+
+**Horizontal Movement Mechanic (Preparation Zone Only)**:
+- Swipe left/right gesture on cube in y=1-8: Move cube horizontally
+- Swipe left: Move cube one cell to the left (x-1)
+- Swipe right: Move cube one cell to the right (x+1)
+- Movement is instant with smooth slide animation
+- Movement blocked if:
+  - Target cell is occupied by another cube
+  - Target position is outside grid (x<1 or x>12)
+- Cube continues moving upward after horizontal movement
+- No limit on horizontal movements per cube while in preparation zone
+- Visual feedback: Slide animation with motion trail
+- Swipes on cubes in y=9-24 are ignored
+
+**Vertical Movement Mechanic (Preparation Zone Only)**:
+- Swipe up/down gesture on cube in y=1-8: Move cube vertically
+- Swipe up: Move cube one cell upward (y+1)
+- Swipe down: Move cube one cell downward (y-1)
+- Movement is instant with smooth slide animation
+- Movement blocked if:
+  - Target cell is occupied by another cube
+  - Target position is outside preparation zone (y<1 or y>8)
+- Cube continues automatic upward movement after vertical repositioning
+- No limit on vertical movements per cube while in preparation zone
+- Visual feedback: Slide animation with motion trail
+- Swipes on cubes in y=9-24 are ignored
+
+**Heating Mechanic (Preparation Zone Only)**:
+- 8 consecutive taps on same cube within 2 seconds: Cube turns Red (heated state)
+- Red cube acts as universal wildcard for matching
+- Tap counter resets if:
+  - More than 2 seconds pass between taps
+  - Player taps different cube
+  - Cube participates in a match
+  - Cube crosses into automatic zone (y=9)
+- Visual feedback: Tap counter appears above cube (1/8, 2/8, etc.)
+- Red cube glows with pulsing red-orange particles and heat wave distortion effect
+- Heating only possible in preparation zone (y=1-8)
+
+**Figure Definition and Completion**:
+- A figure consists of 3 or more same-colored cubes connected by edges (not diagonals)
+- Edge connection: Two cubes share a common side (horizontally or vertically adjacent)
+- Diagonal connection does NOT count as part of same figure
+- A figure is considered complete when:
+  - All cubes in the figure are edge-connected to at least one other cube in the figure
+  - No additional same-colored cubes are edge-connected to the figure
+  - Surrounding cells are either empty or contain cubes of different colors (diagonal adjacency allowed)
+- Examples:
+  - 3 yellow cubes in horizontal line = complete figure
+  - 4 blue cubes in L-shape (edge-connected) = complete figure
+  - 2 green cubes edge-connected + 1 green cube diagonally adjacent = 2 separate entities (incomplete)
+
+**Figure Acceleration System**:
+- Acceleration trigger condition: Complete figure fully crosses separator line from y=8 to y=9
+- Full crossing definition: Every cube in the figure must have y≥9
+- Acceleration effect: All cubes in the figure move at 2× speed (600ms per cell instead of 1200ms)
+- Partial crossing: If only some cubes of a figure cross the line, acceleration does NOT occur
+- Last cube rule: Acceleration activates only when the last cube of the figure crosses into y=9
+- Motivation: Encourages players to create smaller, compact figures for faster progression
+- Visual feedback: Speed lines or motion blur effect on accelerated figures
+- Accelerated figures maintain 2× speed until they participate in a match or reach y=24
+
+**Match System (Automatic Zone Only)**:
+- Match condition: 3 or more cubes of same color aligned horizontally, vertically, or in Tetris-like shapes
+- Horizontal match: 3+ cubes in same row (same y-coordinate)
+- Vertical match: 3+ cubes in same column (same x-coordinate)
+- Shape match: Cubes forming recognizable Tetris shapes (L-shape, T-shape, Z-shape, Square)
+- Match detection occurs every frame for all cubes in automatic zone (y≥9) only
+- Matches do NOT trigger in preparation zone (y=1-8)
+- When match detected in automatic zone:
+  - Matched cubes display flashing outline effect for 0.5 seconds
+  - Outline color matches cube color with increased brightness
+  - Flash frequency: 3 pulses per 0.5 seconds
+  - After outline animation, cubes explode with particle burst
+  - Points awarded based on match size and shape
+  - Combo counter increments
+  - Reduced screen shake effect (33% of original intensity)
+  - Cubes above the cleared row fall down to fill the gap
+- Red cube matching rule: Counts as any color needed to complete match
+- Multiple matches can occur simultaneously (cascade scoring)
+- Matches can form with any combination of moving, stopped, and flying cubes in automatic zone
+
+**Match Visual Effects**:
+- 3-cube match: Single outline flash, small particle burst
+- 4-cube match: Double outline flash, medium particle burst with sparkles
+- 5+ cube match: Triple outline flash, large particle burst with explosion wave
+- Shape match: Special outline pattern following shape contour, enhanced particle effects
+- Outline thickness: 3 pixels, semi-transparent glow
+- Particle colors match cube colors with trailing effects
+- Screen shake reduced to 33% of original intensity
+
+**Gravity After Match**:
+- When horizontal match clears cubes in a row, cubes above fall down one cell
+- When vertical match clears cubes in a column, cubes above fall down to fill gap
+- When shape match clears cubes, all cubes above cleared positions fall down
+- Falling cubes move at 2× normal speed (600ms per cell)
+- Falling can create new matches (cascade effect)
+- Cascade matches award full points and maintain combo
+
+**Scoring System**:
+- 3-cube match: 30 points
+- 4-cube match: 60 points
+- 5-cube match: 100 points
+- 6-cube match: 150 points
+- 7+ cube match: 200 points + 50 per additional cube
+- Shape match bonus: +50 points for L-shape, T-shape, Z-shape; +100 points for Square
+- Combo multiplier: ×1.5 for 2nd consecutive match, ×2.0 for 3rd, ×2.5 for 4th+
+- Combo resets after 3 seconds without new match
+- Red cube in match: +20 bonus points
+- Cascade match: Full points with combo maintained
+
+**Flying Cube System**:
+- Flying cubes move horizontally across rows in upper zone (y=19-23)
+- Spawn from off-screen (x=-1 moving right, or x=13 moving left)
+- Random color assignment on spawn: Yellow, Blue, Green, or White (25% each)
+- Movement speed: 1.5-2.5 cells/sec (increases with waves)
+- Spawn interval: 1.8 seconds base (decreases with waves)
+- Flying cube appearance: Same gradient material as vertical cubes, with motion trail effect
+
+**Flying Cube Matching Logic**:
+- Flying cube participates in horizontal matches as it moves through its row in automatic zone
+- Match condition: Flying cube color matches 2 or more same-colored cubes already in its row
+- Match triggers when flying cube aligns with matching cubes (same y-coordinate)
+- Matched cubes (including flying cube) display flashing outline, then explode
+- Flying cube continues moving if no match occurs
+- Multiple flying cubes can exist simultaneously in different rows
+
+**Collision Logic**:
+- Flying cube + Vertical cube: Flying cube stops if vertical cube blocks its path
+- Stopped flying cube becomes part of the grid and can be tapped/moved if in preparation zone
+- Flying cube + Flying cube: Both continue moving (pass through each other)
+- Vertical cube moving upward + Flying cube: Vertical cube stops at collision point
+
+**Wave Progression**:
+- Wave advances every 60 seconds of gameplay time
+- Wave 1-3: Flying cubes at 1.5 cells/sec, 2.0s spawn interval
+- Wave 4-6: Flying cubes at 1.8 cells/sec, 1.7s spawn interval
+- Wave 7-9: Flying cubes at 2.0 cells/sec, 1.5s spawn interval
+- Wave 10+: +0.1 speed per wave, -0.1s spawn interval per wave
+
+**Random Events** (every 30 seconds):
+- Color Surge: All cubes change to random single color for 5 seconds
+- Rainbow Rain: Spawn 5 cubes of each color simultaneously
+- Flying Wave: Horizontal wave of 5 flying cubes spawns simultaneously
+- Slowdown: Flying cube speed -50% for 5 seconds
+- 2-second warning icon before event triggers
+
+**Blizzard Event** (every 10 waves):
+- Duration: 10 seconds
+- Flying cube spawn rate ×2
+- Cube spawn rate +50%
+- Visual: Blue screen tint, particle effects
+
+**HUD Display**:
+- Current wave number
+- Total score
+- Combo counter (shows current combo multiplier)
+- Selected cube tap counter (when heating)
+- Pause button
+
+### 3.5 Pause Menu
+**Purpose**: Mid-game controls
+
+**Elements**:
+- Resume button
+- Restart button
+- Settings access
+- Return to Main Menu (with confirmation)
+- Game state frozen during pause
+
+### 3.6 Game Over Screen
+**Purpose**: Session summary and retention
+
+**Elements**:
+- Final score display
+- Wave reached
+- Statistics: total matches, largest match, max combo, red cubes created, shape matches
+- New record indicator (if applicable)
+- Three action buttons:
+  - Restart (free, instant)
+  - Continue (watch ad or spend 50 crystals, clear top 3 rows)
+  - Main Menu
+- Share button (if new record)
+
+**Death Sequence**:
+- 1-second time slowdown
+- Red screen tint
+- Vibration feedback
+- Transition to Game Over Screen
+
+### 3.7 Shop Screen
+**Purpose**: Meta-progression and monetization
+
+**Upgrades Tab**:
+- Match Bonus (5 levels): +10% points per match, costs 500/1000/2000/4000/8000 match points
+- Combo Duration (5 levels): +1 second combo window, costs 300/600/1200/2400/4800 match points
+- Spawn Control (5 levels): +5% chance for desired color spawn, costs 400/800/1600/3200/6400 match points
+- Heat Speed (3 levels): Reduce heating taps to 7/6/5, costs 1000/2500/5000 match points
+- Match Range (3 levels): Allow diagonal matches, costs 2000/5000/10000 match points
+- Each upgrade shows current level, next level effect, and cost
+- Purchase button (disabled if insufficient currency)
+
+**Skins Tab**:
+- Default Cube (free, unlocked)
+- Neon Cube ($0.99 or 200 crystals)
+- Gem Cube ($0.99 or 200 crystals)
+- Plasma Cube ($1.99 or 400 crystals)
+- Preview animation for each skin
+- Equip button for owned skins
+
+**Crystal Packages**:
+- Small Pack: 100 crystals for $0.99
+- Medium Pack: 500 crystals for $3.99
+- Large Pack: 2000 crystals for $9.99
+- Remove Ads: $4.99 (permanent)
+
+### 3.8 Settings Screen
+**Purpose**: User preferences
+
+**Options**:
+- Audio toggle (on/off)
+- Vibration toggle (on/off)
+- Language selection (if multiple languages supported)
+- Tutorial reset button
+- Account management (if applicable)
+- Privacy policy link
+- Terms of service link
+
+### 3.9 Leaderboards Screen
+**Purpose**: Social competition
+
+**Tabs**:
+- Daily Leaderboard (resets at 00:00 UTC)
+- Weekly Leaderboard (resets Friday 18:00 UTC)
+- All-Time Leaderboard
+
+**Display Format**:
+- Rank, Player Name, Score, Wave Reached
+- Player's own rank highlighted
+- Top 100 players shown
+- Scroll to view more entries
+
+### 3.10 Daily Reward Calendar
+**Purpose**: Daily engagement incentive
+
+**Structure**:
+- 7-day calendar grid
+- Progressive rewards:
+  - Day 1: 50 match points
+  - Day 2: 100 match points
+  - Day 3: 20 crystals
+  - Day 4: 200 match points
+  - Day 5: 50 crystals
+  - Day 6: 500 match points
+  - Day 7: 100 crystals + random skin
+- Claimed days marked with checkmark
+- Current day highlighted
+- Claim button (active only on login)
+
+## 4. Business Rules and Logic
+
+### 4.1 Zone System Rules
+- Grid divided into two zones:
+  - Preparation Zone: y=1 to y=8 (8 rows)
+  - Automatic Zone: y=9 to y=24 (16 rows)
+- Zone separator line displayed at y=8/y=9 boundary (bright yellow, semi-transparent, 2-pixel thickness)
+- Preparation Zone rules:
+  - Player can tap cubes to change colors
+  - Player can swipe cubes horizontally to move them left/right
+  - Player can swipe cubes vertically to move them up/down
+  - Player can heat cubes to red state
+  - Cubes continue moving upward automatically
+  - Matches do NOT trigger (no cube removal)
+  - This is a strategic preparation area for figure assembly
+- Automatic Zone rules:
+  - All player interactions disabled (taps and swipes ignored)
+  - Cubes move upward automatically
+  - Matches trigger when 3+ same-colored cubes align
+  - Matched cubes explode and are removed
+- Zone transition:
+  - When a complete figure fully crosses from y=8 to y=9, it accelerates to 2× speed
+  - Brief flash effect displayed when figure crosses separator
+  - Tap counter resets if cube was being heated
+  - Cube retains its current color after crossing
+
+### 4.2 Figure Definition and Completion Logic
+- Figure: 3 or more same-colored cubes connected by edges (horizontal or vertical adjacency)
+- Edge connection: Two cubes share a common side (x±1 or y±1, not diagonal)
+- Diagonal adjacency does NOT count as part of same figure
+- Complete figure criteria:
+  - All cubes in figure are edge-connected (form continuous chain)
+  - No additional same-colored cubes are edge-connected to the figure
+  - Surrounding cells contain either empty space or different-colored cubes
+  - Diagonal adjacency to different-colored cubes is allowed
+- Figure detection algorithm:
+  - Scan all cubes in preparation zone
+  - Group same-colored cubes by edge connectivity
+  - Check if group has no additional edge-connected same-colored cubes
+  - Mark group as complete figure if criteria met
+
+### 4.3 Figure Acceleration System
+- Acceleration trigger: Complete figure fully crosses separator line (all cubes have y≥9)
+- Last cube rule: Acceleration activates only when the last cube of the figure enters y=9
+- Partial crossing: If figure spans y=8 and y=9, acceleration does NOT occur
+- Acceleration effect: All cubes in figure move at 2× speed (600ms per cell instead of 1200ms)
+- Speed multiplier applies until:
+  - Figure participates in a match and explodes
+  - Figure reaches y=24 and stops
+- Visual feedback: Speed lines, motion blur, or trailing particles on accelerated figures
+- Strategic motivation: Smaller figures (3-4 cubes) cross faster and accelerate sooner than large figures
+- Figure integrity: Accelerated figures maintain their structure during upward movement
+
+### 4.4 Color System
+- Four base colors: Yellow, Blue, Green, White
+- Color cycle order: Yellow → Blue → Green → White → Yellow (loops)
+- Single tap advances color by one step in cycle
+- Color change takes effect immediately with smooth gradient transition
+- No cooldown between color changes
+- Red color (heated state) obtained only through 8 consecutive taps
+- Color changes only possible in preparation zone (y=1-8)
+
+### 4.5 Horizontal Movement System
+- Swipe gesture on cube triggers horizontal movement
+- Swipe left: Move cube to x-1 position
+- Swipe right: Move cube to x+1 position
+- Movement is instant with smooth slide animation (200ms duration)
+- Movement blocked if:
+  - Target cell occupied by another cube
+  - Target position outside grid boundaries (x<1 or x>12)
+  - Cube is in automatic zone (y≥9)
+- Cube continues upward movement after horizontal repositioning
+- No limit on number of horizontal movements per cube in preparation zone
+- Visual feedback: Slide animation with motion trail effect
+- Collision detection: Check target cell before movement execution
+
+### 4.6 Vertical Movement System
+- Swipe gesture on cube triggers vertical movement
+- Swipe up: Move cube to y+1 position
+- Swipe down: Move cube to y-1 position
+- Movement is instant with smooth slide animation (200ms duration)
+- Movement blocked if:
+  - Target cell occupied by another cube
+  - Target position outside preparation zone (y<1 or y>8)
+  - Cube is in automatic zone (y≥9)
+- Cube continues automatic upward movement after vertical repositioning
+- No limit on number of vertical movements per cube in preparation zone
+- Visual feedback: Slide animation with motion trail effect
+- Collision detection: Check target cell before movement execution
+
+### 4.7 Heating System
+- Tap counter starts at 0 for each cube
+- Each tap on same cube increments counter by 1
+- Counter displays above cube as fraction (e.g., 3/8)
+- At 8 taps within 2-second window: Cube turns red
+- Red state is permanent until cube participates in match
+- Tap counter resets to 0 if:
+  - 2 seconds elapse between taps
+  - Player taps different cube
+  - Cube completes a match
+  - Cube crosses into automatic zone (y≥9)
+- Visual feedback:
+  - Tap 1-3: Faint glow
+  - Tap 4-6: Moderate glow with heat waves
+  - Tap 7: Intense glow with sparks
+  - Tap 8: Transform to red with particle burst and heat distortion
+- Heating only possible in preparation zone (y=1-8)
+
+### 4.8 Match Detection and Resolution (Automatic Zone Only)
+- Match check performed every frame for all cubes in automatic zone (y≥9)
+- Matches do NOT trigger in preparation zone (y=1-8)
+- Horizontal match: Scan each row for 3+ consecutive same-color cubes
+- Vertical match: Scan each column for 3+ consecutive same-color cubes
+- Shape match: Detect Tetris-like patterns:
+  - L-shape: 4 cubes forming L pattern
+  - T-shape: 4 cubes forming T pattern
+  - Z-shape: 4 cubes forming Z pattern
+  - Square: 4 cubes forming 2×2 square
+- Flying cube matching: Check if flying cube color matches 2+ same-colored cubes in its current row
+- Red cube wildcard rule:
+  - Red cube adopts color of adjacent cubes in potential match
+  - If 2 Green + 1 Red in line: Counts as 3 Green
+  - If 1 Red between 2 different colors: No match
+  - Multiple red cubes in same match: Each acts as wildcard
+- Match priority: Larger matches and shape matches processed first
+- Simultaneous matches: All detected matches resolve in same frame
+- Match resolution sequence:
+  1. Identify all valid matches in automatic zone (horizontal, vertical, shapes)
+  2. Display flashing outline effect on matched cubes for 0.5 seconds
+  3. Calculate total points (base + shape bonus + combo + red bonus)
+  4. Remove matched cubes with explosion particle effects
+  5. Apply gravity (cubes above fall down)
+  6. Check for cascade matches
+  7. Increment combo counter
+  8. Update score display
+  9. Trigger reduced screen shake (33% intensity)
+- Combo timer: 3-second window to create next match
+- Combo multiplier progression:
+  - 1st match: ×1.0 (base)
+  - 2nd match: ×1.5
+  - 3rd match: ×2.0
+  - 4th+ match: ×2.5
+- Combo resets if 3 seconds pass without new match
+- Cascade matches maintain combo and award full points
+
+### 4.9 Cube Spawning and Movement
+- Spawn location: Random x-position from 1 to 12 at y=0
+- Spawn color: Random selection from Yellow, Blue, Green, White (25% each)
+- Spawn interval progression:
+  - Wave 1-3: 500ms between spawns
+  - Wave 4-6: 400ms between spawns
+  - Wave 7-9: 300ms between spawns
+  - Wave 10+: 200ms between spawns
+- Movement: Each cube moves upward in its spawned vertical lane
+- Base movement interval: 1200ms per cell
+- Accelerated movement interval: 600ms per cell (for figures that fully crossed separator)
+- Movement stops when:
+  - Cube reaches y=24 (top boundary)
+  - Next cell above is occupied by another cube
+  - Cube collides with flying cube
+- Stopped cubes remain in place and form stacking structure
+- Cubes can be tapped and moved horizontally/vertically while in preparation zone (y=1-8)
+
+### 4.10 Gravity and Falling Mechanics
+- When match clears cubes in automatic zone, all cubes above the cleared position fall down
+- Falling speed: 600ms per cell (2× normal movement speed)
+- Cubes fall until:
+  - They reach another stopped cube below
+  - They reach y=0 (bottom)
+  - They complete falling distance
+- Falling cubes can form new matches during fall
+- Multiple columns can fall simultaneously
+- Falling animation is smooth and continuous
+- Falling cubes maintain their locked/unlocked state based on current y-position
+
+### 4.11 Flying Cube Spawning and Movement
+- Spawn location: x=-1 (moving right) or x=13 (moving left)
+- Spawn y-range: 19-23
+- Base spawn interval: 1.8 seconds
+- Spawn interval reduction: -0.1s per wave after wave 3
+- Minimum spawn interval: 0.5 seconds
+- Color distribution on spawn: Yellow, Blue, Green, White (25% each)
+- Movement speed formula: base_speed + (wave × speed_per_wave)
+  - Base: 1.5 cells/sec
+  - Increment: 0.1 cells/sec per wave
+- Flying cube removed when:
+  - Participates in match and explodes
+  - Moves off-screen (x<-1 or x>13)
+  - Collides with vertical cube and stops
+
+### 4.12 Collision Resolution
+- Check performed every frame for cubes in y=19-23 range
+- Collision detected when flying cube and vertical cube occupy same cell
+- Resolution:
+  - Flying cube stops at collision point
+  - Stopped flying cube becomes part of the grid
+  - Can be tapped to change color or moved horizontally/vertically if in preparation zone
+  - Can be heated if in preparation zone
+  - Blocks horizontal movement for other flying cubes
+- Vertical cube moving upward into flying cube path: Vertical cube stops
+
+### 4.13 Scoring Calculation
+- Base match points:
+  - 3 cubes: 30 points
+  - 4 cubes: 60 points
+  - 5 cubes: 100 points
+  - 6 cubes: 150 points
+  - 7 cubes: 200 points
+  - 8+ cubes: 200 + (50 × (count - 7)) points
+- Shape match bonus:
+  - L-shape: +50 points
+  - T-shape: +50 points
+  - Z-shape: +50 points
+  - Square: +100 points
+- Combo multiplier applied to base points
+- Red cube bonus: +20 points per red cube in match
+- Cascade match: Full points with combo maintained
+- Total score formula: ((base_points + shape_bonus) × combo_multiplier) + red_bonus
+
+### 4.14 Wave Progression Logic
+- Wave increments every 60 seconds of active gameplay
+- Difficulty scaling:
+  - Flying cube speed: +0.1 cells/sec per wave
+  - Spawn interval: -0.1s per wave (minimum 0.5s)
+  - Cube spawn rate increases with wave progression
+- Blizzard trigger: Every 10th wave (10, 20, 30, etc.)
+
+### 4.15 Random Event System
+- Event trigger: Every 30 seconds of active gameplay
+- Event selection: Random from available pool
+- Warning phase: 2-second icon flash before activation
+- Event types and effects:
+  - Color Surge: All active cubes change to same random color for 5 seconds
+  - Rainbow Rain: Spawn 5 cubes of each color (20 total) over 3 seconds
+  - Flying Wave: Spawn 5 flying cubes simultaneously at random y in 19-23 range
+  - Slowdown: Multiply flying cube speed by 0.5 for 5 seconds
+- Events do not stack (new event cancels previous if overlapping)
+
+### 4.16 Blizzard Event
+- Trigger condition: Wave number divisible by 10
+- Duration: 10 seconds
+- Effects:
+  - Flying cube spawn interval ×0.5 (twice as frequent)
+  - Cube spawn rate +50%
+  - Visual: Blue screen overlay, increased particle density
+- Warning: 3-second countdown before activation
+
+### 4.17 Game Over Conditions
+- Primary: Any vertical lane fills completely from y=0 to y=24 with stopped cubes
+- Secondary: Player manually quits to menu
+- On Game Over:
+  - Stop all cube spawning and movement
+  - Trigger death sequence (slowdown, effects)
+  - Calculate final statistics
+  - Check for new records
+  - Display Game Over Screen
+
+### 4.18 Continue Mechanic
+- Available once per session
+- Cost: Watch rewarded ad OR spend 50 crystals
+- Effect: Clear all cubes in top 3 rows (y=22-24), resume at current wave with current score
+- Disabled if player has no ads available and insufficient crystals
+
+### 4.19 Achievement System
+- Match Master: Create 50 matches in single session (reward: 50 crystals)
+- Color Expert: Create 10 red cubes in single session (reward: 100 crystals)
+- Combo King: Achieve ×2.5 combo multiplier (reward: 200 crystals)
+- Wave Warrior: Reach wave 10 (reward: 150 crystals)
+- Cascade Master: Trigger 5 cascade matches in single session (reward: 100 crystals)
+- Shape Master: Create 10 shape matches in single session (reward: 150 crystals)
+- Achievements tracked per session and cumulative
+- Notification popup on achievement unlock
+- Rewards auto-added to player account
+
+### 4.20 Upgrade System
+- Upgrades purchased with match points (earned from gameplay)
+- Each upgrade has 3-5 levels with exponential cost scaling
+- Upgrades are permanent and apply to all future sessions
+- Effects stack additively within same upgrade type
+- No upgrade refunds or resets
+
+### 4.21 Skin System
+- Skins are cosmetic only (no gameplay advantage)
+- One skin equipped at a time
+- Skins apply to all cubes in game (vertical and flying)
+- Purchased skins saved to player account permanently
+- Skins available via IAP or crystal purchase
+
+## 5. Exception and Boundary Conditions
+
+| Scenario | Handling |
+|---|---|
+| Player taps cube in automatic zone | Tap ignored, no action |
+| Player swipes cube in automatic zone | Swipe ignored, no action |
+| Player taps outside grid | No action, tap ignored |
+| Player taps on flying cube | No action unless cube has stopped and is in preparation zone |
+| Player taps on empty cell | No action, tap ignored |
+| Player swipes cube to occupied cell | Movement blocked, cube remains in current position |
+| Player swipes cube to boundary | Movement blocked if target x<1 or x>12 or y<1 or y>8 |
+| Player swipes cube vertically beyond y=8 | Movement blocked, cube remains in current position |
+| Player swipes cube downward below y=1 | Movement blocked, cube remains in current position |
+| Player taps cube during match animation | Tap queued, processed after animation if cube still in preparation zone |
+| Player swipes cube during match animation | Swipe queued, processed after animation if cube still in preparation zone |
+| 8 taps completed but cube in match | Heating cancelled, cube removed with match |
+| Cube being heated crosses to y=9 | Tap counter resets, heating cancelled, cube locked |
+| Red cube crosses to y=9 | Remains red, locked in automatic zone |
+| Red cube stopped on flying cube path | Remains red, flying cube stops on collision |
+| Multiple matches in same frame | All matches resolve simultaneously, points summed |
+| Combo timer expires during match animation | Combo maintained until animation completes |
+| Flying cube spawns on occupied cell | Spawn delayed until cell clear or spawn at alternate y |
+| Vertical lane completely full | Game Over triggered |
+| Player force-closes app mid-game | Session not saved, no progress recorded |
+| Player backgrounds app | Game auto-pauses, resume on return |
+| Device low memory | Reduce particle count, maintain 30 FPS minimum |
+| Network disconnection | Leaderboard updates queued, retry on reconnection |
+| Ad fails to load | Continue option shows crystal-only payment |
+| IAP transaction fails | Transaction rolled back, no currency deducted |
+| Achievement unlock during Game Over | Queue notification, show after returning to menu |
+| Multiple achievements unlock simultaneously | Show notifications sequentially with 1s delay |
+| Player reaches wave 100+ | Difficulty continues scaling, no cap |
+| Score exceeds integer limit | Use long integer type, no overflow |
+| Match size exceeds 12 cubes | Points calculated correctly, no cap |
+| All cubes on field are red | Normal gameplay continues, matches still require alignment |
+| Color Surge during active combo | Combo maintained, timer continues |
+| Flying Wave spawns during match | Flying cubes spawn normally, does not interrupt match |
+| Cascade creates multiple sequential matches | Each cascade match awards points and maintains combo |
+| Cubes fall during pause | Falling animation freezes with game state |
+| Match occurs while cubes falling | Match detection continues, falling cubes participate |
+| Flying cube matches with falling cubes | Match triggers normally, all cubes explode |
+| Multiple flying cubes in same row | Each moves independently, can create separate matches |
+| Shape match spans both zones | Match only triggers if all cubes are in automatic zone (y≥9) |
+| Cube moved horizontally during upward movement | Both movements execute simultaneously, smooth animation |
+| Cube moved vertically during upward movement | Both movements execute simultaneously, smooth animation |
+| Multiple cubes moved to same target cell | First movement succeeds, subsequent movements blocked |
+| Swipe gesture too short | Gesture ignored, no movement |
+| Swipe gesture diagonal | Dominant direction component used (horizontal or vertical) |
+| Zone separator line obscures cube | Cube rendered above separator line |
+| Figure partially crosses separator | No acceleration until all cubes cross |
+| Figure spans preparation and automatic zones | Acceleration does not occur, cubes move at base speed |
+| Last cube of figure crosses separator | Acceleration activates for entire figure |
+| Accelerated figure participates in match | Figure explodes, acceleration ends |
+| Accelerated figure reaches y=24 | Figure stops, acceleration ends |
+| Player creates match in preparation zone | No match triggers, cubes remain in place |
+| 3+ same-colored cubes aligned in preparation zone | No explosion, cubes remain for strategic positioning |
+| Player moves cube vertically within preparation zone | Movement succeeds if target cell empty and within y=1-8 |
+| Cube moved vertically collides with another cube | Movement blocked, cube remains in current position |
+
+## 6. Acceptance Criteria
+
+### 6.1 Core Gameplay
+- Cubes spawn randomly at y=0 across x-positions 1-12 with equal color distribution
+- Each cube moves upward in its spawned vertical lane at 1200ms per cell (base speed)
+- Cubes stop when reaching y=24 or colliding with cube above
+- Stopped cubes remain in place and accumulate vertically
+- Accelerated figures move at 600ms per cell (2× speed)
+
+### 6.2 Zone System
+- Grid displays horizontal separator line at y=8/y=9 boundary (bright yellow, 2-pixel thickness, opacity 0.6)
+- Preparation zone (y=1-8) allows all player interactions (tap, horizontal swipe, vertical swipe)
+- Automatic zone (y=9-24) blocks all player interactions
+- Matches do NOT trigger in preparation zone
+- Matches trigger normally in automatic zone
+- Cubes crossing from y=8 to y=9 display brief flash effect
+- Tap counter resets when cube crosses to automatic zone
+- Taps and swipes on cubes in automatic zone are ignored
+
+### 6.3 Color Cycling
+- Single tap on cube in preparation zone cycles color through Yellow → Blue → Green → White → Yellow
+- Color change applies instantly with smooth gradient transition
+- Taps on cubes in automatic zone produce no effect
+- No cooldown between color changes
+- Visual feedback: Brief glow pulse on color change
+
+### 6.4 Horizontal Movement
+- Swipe left on cube in preparation zone moves cube to x-1 position
+- Swipe right on cube in preparation zone moves cube to x+1 position
+- Movement executes with smooth slide animation (200ms duration)
+- Movement blocked if target cell occupied or outside boundaries
+- Swipes on cubes in automatic zone produce no effect
+- Cube continues upward movement after horizontal repositioning
+- Visual feedback: Slide animation with motion trail
+
+### 6.5 Vertical Movement
+- Swipe up on cube in preparation zone moves cube to y+1 position
+- Swipe down on cube in preparation zone moves cube to y-1 position
+- Movement executes with smooth slide animation (200ms duration)
+- Movement blocked if target cell occupied or outside preparation zone (y<1 or y>8)
+- Swipes on cubes in automatic zone produce no effect
+- Cube continues automatic upward movement after vertical repositioning
+- Visual feedback: Slide animation with motion trail
+
+### 6.6 Figure Definition and Completion
+- Figure consists of 3+ same-colored cubes connected by edges (not diagonals)
+- Edge connection: Cubes share common side (horizontally or vertically adjacent)
+- Diagonal adjacency does NOT count as part of same figure
+- Complete figure: All cubes edge-connected, no additional same-colored cubes edge-connected
+- System correctly identifies complete figures in preparation zone
+
+### 6.7 Figure Acceleration System
+- Complete figure accelerates to 2× speed when fully crossing separator line
+- Acceleration activates only when last cube of figure enters y=9
+- Partial crossing (figure spans y=8 and y=9) does NOT trigger acceleration
+- Accelerated figures move at 600ms per cell
+- Visual feedback: Speed lines or motion blur on accelerated figures
+- Acceleration persists until figure participates in match or reaches y=24
+- Smaller figures (3-4 cubes) cross faster than larger figures
+
+### 6.8 Heating System
+- 8 consecutive taps within 2 seconds turn cube red (only in preparation zone)
+- Tap counter displays above cube as fraction
+- Red cube glows with red-orange particles and heat distortion
+- Tap counter resets when cube crosses to automatic zone
+- Red state persists until cube participates in match
+- Heating only possible in preparation zone
+
+### 6.9 Visual Design
+- Grid displays thin semi-transparent white lines (opacity 0.15) on dark gradient background
+- Zone separator line clearly visible (bright yellow, 2-pixel thickness, opacity 0.6)
+- All cubes use gradient materials with smooth color transitions
+- Cube colors match specified gradient palettes
+- Cubes have glossy finish and rounded edges
+- Background gradient transitions from deep blue to black
+
+### 6.10 Match System (Automatic Zone Only)
+- 3+ aligned cubes of same color (horizontal or vertical) trigger match in automatic zone
+- Tetris-like shape patterns (L, T, Z, Square) trigger shape matches in automatic zone
+- Matched cubes display flashing outline effect for 0.5 seconds before explosion
+- Outline color matches cube color with increased brightness
+- Flash frequency: 3 pulses per 0.5 seconds
+- After outline animation, cubes explode with particle burst
+- Red cubes act as wildcards and complete matches with any color
+- Match detection occurs every frame for all cubes in automatic zone only
+- No matches trigger in preparation zone
+- Multiple simultaneous matches resolve correctly
+- Combo counter increments on consecutive matches
+- Combo multiplier applies correctly (×1.0, ×1.5, ×2.0, ×2.5)
+- Combo resets after 3 seconds without new match
+
+### 6.11 Match Visual Effects
+- 3-cube match: Single outline flash, small particle burst
+- 4-cube match: Double outline flash, medium particle burst with sparkles
+- 5+ cube match: Triple outline flash, large particle burst with explosion wave
+- Shape match: Special outline pattern, enhanced particle effects
+- Screen shake reduced to 33% of original intensity
+- Screen shake intensity scales with match size
+
+### 6.12 Gravity and Cascade
+- When match clears cubes in automatic zone, cubes above fall down to fill gap
+- Falling cubes move at 600ms per cell
+- Falling cubes stop when reaching another cube or y=0
+- Cascade matches form during falling and award full points
+- Cascade matches maintain combo multiplier
+- Multiple columns can fall simultaneously
+- Falling animation is smooth and continuous
+
+### 6.13 Scoring
+- 3-cube match awards 30 points
+- 4-cube match awards 60 points
+- 5-cube match awards 100 points
+- 6-cube match awards 150 points
+- 7+ cube matches award 200 + 50 per additional cube
+- Shape match bonus: +50 for L/T/Z, +100 for Square
+- Red cube in match adds +20 bonus points
+- Combo multiplier applies to base points correctly
+- Cascade matches award full points with combo maintained
+
+### 6.14 Flying Cube System
+- Flying cubes spawn at x=-1 or x=13 in y-range 19-23
+- Flying cubes assigned random color on spawn (25% each)
+- Flying cubes move horizontally at speeds matching wave difficulty
+- Flying cubes display motion trail effect
+- Flying cube participates in horizontal match when passing through row with 2+ same-colored cubes
+- Match triggers when flying cube aligns with matching cubes
+- Matched flying cube displays flashing outline, then explodes
+- Flying cube stops when colliding with vertical cube
+- Stopped flying cube can be interacted with if in preparation zone
+- Multiple flying cubes can exist simultaneously in different rows
+
+### 6.15 Wave Progression
+- Wave increments every 60 seconds of gameplay
+- Flying cube speed increases by 0.1 cells/sec per wave
+- Spawn interval decreases by 0.1s per wave
+- Cube spawn rate increases with wave progression
+- Blizzard event triggers every 10 waves
+
+### 6.16 Events
+- Random event triggers every 30 seconds
+- 2-second warning displays before event activation
+- Color Surge changes all cubes to same color for 5 seconds
+- Rainbow Rain spawns 20 cubes (5 of each color)
+- Flying Wave spawns 5 flying cubes simultaneously
+- Slowdown reduces flying cube speed by 50% for 5 seconds
+
+### 6.17 UI and Menus
+- Main Menu displays player stats and daily reward
+- Game HUD shows wave, score, and combo counter in real-time
+- Tap counter displays above cube during heating
+- Zone separator line clearly visible during gameplay
+- Pause menu freezes game state including falling cubes
+- Game Over screen shows accurate statistics including shape matches
+- Shop displays all upgrades, skins, and IAP options
+- Leaderboards show top 100 players per category
+- Settings allow audio and vibration toggles
+
+### 6.18 Meta-Progression
+- Match points awarded for matches and cascade matches
+- Upgrades purchased with match points apply permanently
+- Skins purchased with crystals or IAP unlock permanently
+- Achievements unlock and award crystals correctly
+- Shape Master achievement tracks shape matches
+- Daily rewards reset at 00:00 UTC
+- Leaderboards update in real-time
+
+### 6.19 Monetization
+- Rewarded ads grant continue option
+- Interstitial ads display every 3 deaths
+- IAP transactions process correctly
+- Remove Ads IAP disables all ads permanently
+- Crystal packages deliver correct amounts
+
+### 6.20 Performance
+- Game runs at 60 FPS on mid-range devices
+- Game runs at 30 FPS minimum on low-end devices
+- Maximum 288 cubes can exist on grid
+- Particle effects capped at 100 simultaneous
+- No memory leaks during extended sessions
+- Smooth animations for horizontal movement, vertical movement, and zone transitions
+
+### 6.21 Audio
+- Tap produces click sound
+- Color change produces soft chime
+- Horizontal movement produces slide sound
+- Vertical movement produces slide sound
+- Match produces satisfying pop sound
+- Red cube creation produces heating hiss
+- Flying cube movement produces subtle whoosh sound
+- Combo sounds increase in pitch with multiplier
+- Falling cubes produce subtle whoosh sound
+- Shape match produces special sound effect
+- Figure acceleration produces speed-up sound effect
+- All sounds respect audio toggle setting
+
+### 6.22 Visual Effects
+- Reduced screen shake on match completion (33% intensity)
+- Time slowdown on death
+- Particle effects on color change, heating, and matches
+- Color transitions smooth with gradient animation
+- UI animations fluid and responsive
+- Combo multiplier displays with scaling animation
+- Falling animation smooth and continuous
+- Motion trail effect on flying cubes, horizontal movement, and vertical movement
+- Heat distortion effect on red cubes
+- Flash effect when cube crosses zone separator
+- Slide animation for horizontal and vertical movement
+- Speed lines or motion blur on accelerated figures
+
+### 6.23 Data Persistence
+- Player progress saves locally
+- Upgrades and skins persist across sessions
+- Best score and wave saved
+- Settings preferences saved
+- Leaderboard data syncs with backend
+
+### 6.24 Analytics
+- game_start event fires on session begin
+- game_end event fires with wave, score, duration, total matches, shape matches
+- match_created event tracks match size, color, combo multiplier, shape type
+- cascade_match event tracks cascade depth and points
+- red_cube_created event tracks creation count
+- cube_moved_horizontally event tracks movement count
+- cube_moved_vertically event tracks movement count
+- shape_match_created event tracks shape type
+- zone_transition event tracks cube crossing to automatic zone
+- figure_accelerated event tracks figure size and acceleration timing
+- ad_rewarded_watched event tracks placement
+- iap_purchased event tracks SKU
+
+## 7. Out of Scope for Current Release
+
+- Multiplayer or co-op modes
+- Social features (friends list, chat, gifting)
+- Seasonal events or limited-time modes
+- Additional game modes (endless, time attack, puzzle)
+- Cube customization beyond skins
+- Flying cube customization or variants
+- Power-ups or consumable items
+- Boss battles or special encounters
+- Story mode or narrative elements
+- Landscape orientation support
+- Tablet-optimized UI
+- Controller support
+- Cloud save sync across devices
+- Replay system or video recording
+- Spectator mode
+- Advanced statistics dashboard
+- Clan or guild system
+- In-game chat or messaging
+- User-generated content
+- Level editor
+- Cross-platform play
+- Voice acting or narration
+- Cutscenes or cinematics
+- Multiple difficulty presets
+- Accessibility features (colorblind mode, one-handed mode)
+- Localization beyond English
+- Regional leaderboards
+- Tournament or competitive ranking system
+- Diagonal matching (unless upgraded)
+- Custom color schemes
+- Cube rotation mechanics
+- Physics-based movement beyond gravity
+- Time-limited challenges
+- Special cube types beyond red wildcard
+- Manual cube placement or drag controls
+- Zone size customization
+- Dynamic zone boundaries
+- Multi-touch gestures beyond single tap and swipe
+- Match triggering in preparation zone
+- Cube removal in preparation zone

@@ -1,0 +1,1010 @@
+# Heat Rush 2.0 - Phaser Game Logic
+
+## Game Engine Core Files
+
+### File: `src/game/main.ts`
+```ts
+import Phaser from 'phaser';
+import { Boot } from './scenes/Boot';
+import { MainGame } from './scenes/MainGame';
+import { GAME_WIDTH, GAME_HEIGHT } from './constants';
+
+const config: Phaser.Types.Core.GameConfig = {
+  type: Phaser.AUTO,
+  parent: 'game-container',
+  width: GAME_WIDTH,
+  height: GAME_HEIGHT,
+  scene: [Boot, MainGame],
+  backgroundColor: '#0A0A1A',
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  }
+};
+
+export const StartGame = (parent: string) => {
+  return new Phaser.Game({ ...config, parent });
+};
+```
+
+### File: `src/game/constants.ts`
+```ts
+// 12x24 grid in portrait
+// Common mobile resolution ratio: 540x960 (9:16)
+// 540 / 12 = 45 pixels per cell
+// 24 * 45 = 1080 pixels (so 540x1080 ratio is 1:2)
+export const GAME_WIDTH = 540;
+export const GAME_HEIGHT = 1080;
+
+export const GRID_COLS = 12;
+export const GRID_ROWS = 24;
+export const CELL_SIZE = GAME_WIDTH / GRID_COLS; // 45px
+
+export const Y_SPAWN = 0; // Bottom
+export const Y_ICE_MIN = 19;
+export const Y_ICE_MAX = 23;
+export const Y_FINISH = 24;
+
+export const CUBE_MOVE_INTERVAL = 1200; // ms
+export const CUBE_SPAWN_BASE_INTERVAL = 1600; // ms
+export const CUBE_SPAWN_MIN_INTERVAL = 600; // ms
+
+export const BASE_ICE_SPAWN_INTERVAL = 1800; // ms
+export const BASE_ICE_SPEED = 1.5; // cells per sec
+export const ICE_SPEED_WAVE_INC = 0.1;
+export const ICE_SPAWN_WAVE_DEC = 100; // 0.1 sec -> 100ms
+export const MIN_ICE_SPAWN_INTERVAL = 500;
+
+export const EVENT_INTERVAL = 30000; // 30 sec
+
+export const CUBE_COLORS = ['yellow', 'blue', 'green', 'white'] as const;
+export type CubeColor = typeof CUBE_COLORS[number] | 'red';
+
+export const RED_TAP_THRESHOLD = 8;
+export const RED_TAP_WINDOW = 2000; // ms
+```
+
+### File: `src/game/EventBus.ts`
+```ts
+import Phaser from 'phaser';
+
+// Used to emit events between React components and Phaser scenes
+export const EventBus = new Phaser.Events.EventEmitter();
+```
+
+### File: `src/game/utils.ts`
+```ts
+import { EventBus } from './EventBus';
+
+export function startScene(scene: Phaser.Scene, key: string, data?: object) {
+  scene.scene.start(key, data);
+  EventBus.emit('scene-changed', { key, data });
+}
+```
+
+### File: `src/game/scenes/Boot.ts`
+```ts
+import { Scene } from 'phaser';
+
+export class Boot extends Scene {
+    constructor() {
+        super('Boot');
+    }
+
+    preload() {
+        // Fallback texture generation for missing assets
+        this.load.on('loaderror', (file: any) => {
+            const g = this.add.graphics();
+            g.fillGradientStyle(0x667788, 0x334455, 0x334455, 0x667788);
+            const w = this.game.config.width as number;
+            const h = this.game.config.height as number;
+            g.fillRect(0, 0, w, h);
+            g.generateTexture(file.key, w, h);
+            g.destroy();
+        });
+    }
+
+    create() {
+        // Generate textures programmatically
+        const w = this.game.config.width as number;
+        const h = this.game.config.height as number;
+        
+        // bg
+        const bg = this.add.graphics();
+        bg.fillStyle(0x0A0A1A, 1);
+        bg.fillRect(0, 0, w, h);
+        bg.generateTexture('bg', w, h);
+        bg.destroy();
+
+        // Start main game
+        this.scene.start('MainGame');
+    }
+}
+```
+
+### File: `src/game/scenes/MainGame.ts`
+```ts
+import { Scene } from 'phaser';
+import { EventBus } from '../EventBus';
+import { useGameStore } from '../../store/useGameStore';
+import { useUserStore } from '../../store/useUserStore';
+import {
+  CELL_SIZE, GRID_COLS, GRID_ROWS, Y_SPAWN, Y_ICE_MIN, Y_ICE_MAX, Y_FINISH,
+  CUBE_MOVE_INTERVAL, CUBE_SPAWN_BASE_INTERVAL, CUBE_SPAWN_MIN_INTERVAL,
+  BASE_ICE_SPAWN_INTERVAL, BASE_ICE_SPEED,
+  ICE_SPEED_WAVE_INC, ICE_SPAWN_WAVE_DEC, MIN_ICE_SPAWN_INTERVAL,
+  EVENT_INTERVAL, CUBE_COLORS, CubeColor, RED_TAP_THRESHOLD, RED_TAP_WINDOW
+} from '../constants';
+
+interface FlyingCubeObj {
+  x: number; // pixels
+  y: number; // logical
+  color: CubeColor;
+  sprite: Phaser.GameObjects.Graphics | Phaser.GameObjects.Sprite;
+  speed: number;
+  dir: number; // 1 or -1
+  matched: boolean;
+}
+
+interface CubeObj {
+  x: number; // logical 0-11
+  y: number; // logical 0-24
+  color: CubeColor;
+  stuck: boolean;
+  matched: boolean;
+  tapCount: number;
+  lastTapTime: number;
+  sprite: Phaser.GameObjects.Container;
+  counterText: Phaser.GameObjects.Text;
+}
+
+export class MainGame extends Scene {
+  private cubes: CubeObj[] = [];
+  private flyingCubes: FlyingCubeObj[] = [];
+  private lastMoveTime = 0;
+  private moveTickCounter = 0;
+  private lastCubeSpawn = 0;
+  private lastFlyingSpawn = 0;
+  private eventTimer = 0;
+  private wave = 1;
+  private flyingSpeed = BASE_ICE_SPEED;
+  private flyingInterval = BASE_ICE_SPAWN_INTERVAL;
+  private isGameOver = false;
+
+  private score = 0;
+  private comboTimer = 0;
+  
+  private blizzardEndTime = 0;
+  private isBlizzard = false;
+
+  private blizzardOverlay!: Phaser.GameObjects.Graphics;
+
+  constructor() {
+    super('MainGame');
+  }
+
+  create() {
+    this.add.image(0, 0, 'bg').setOrigin(0);
+    this.drawGrid();
+    
+    this.blizzardOverlay = this.add.graphics();
+    this.blizzardOverlay.fillStyle(0xAAAAFF, 0.2);
+    this.blizzardOverlay.fillRect(0, 0, this.game.config.width as number, this.game.config.height as number);
+    this.blizzardOverlay.setVisible(false);
+    this.blizzardOverlay.setDepth(100);
+
+    // Initial resets
+    this.cubes = [];
+    this.flyingCubes = [];
+    this.score = 0;
+    this.wave = 1;
+    this.isGameOver = false;
+    this.isBlizzard = false;
+    this.blizzardEndTime = 0;
+    this.comboTimer = 0;
+    
+    this.flyingSpeed = BASE_ICE_SPEED;
+    this.flyingInterval = BASE_ICE_SPAWN_INTERVAL;
+
+    this.lastMoveTime = this.time.now;
+    this.moveTickCounter = 0;
+    this.lastCubeSpawn = this.time.now;
+    this.lastFlyingSpawn = this.time.now;
+    this.eventTimer = this.time.now;
+
+    // Reset store
+    useGameStore.getState().resetGame();
+
+    this.input.on('pointerdown', this.handleInput, this);
+    this.setupDragEvents();
+    
+    EventBus.on('game-continue', this.handleContinue, this);
+    this.events.once('shutdown', () => {
+      EventBus.off('game-continue', this.handleContinue, this);
+    });
+    
+    // Spawn initial cube
+    const x = Math.floor(Math.random() * GRID_COLS);
+    this.spawnCube(x);
+  }
+
+  private drawGrid() {
+    const w = this.game.config.width as number;
+    const h = this.game.config.height as number;
+    const g = this.add.graphics();
+    g.lineStyle(1, 0xFFFFFF, 0.15);
+    for (let x = 0; x <= w; x += CELL_SIZE) {
+      g.moveTo(x, 0);
+      g.lineTo(x, h);
+    }
+    for (let y = 0; y <= h; y += CELL_SIZE) {
+      g.moveTo(0, y);
+      g.lineTo(w, y);
+    }
+    g.strokePath();
+
+    // Draw the separator line for interactive zone (y=8 boundary)
+    // y=0 is bottom, y=7 is the 8th row from bottom.
+    // The separator should be just above y=7, so at logical y=8's bottom edge
+    // getVY(8) gives the center of row 8. The bottom edge of row 8 is getVY(8) + CELL_SIZE/2
+    const separatorY = this.getVY(8) + CELL_SIZE / 2;
+    g.lineStyle(2, 0xFFFF00, 0.6);
+    g.beginPath();
+    g.moveTo(0, separatorY);
+    g.lineTo(w, separatorY);
+    g.strokePath();
+  }
+
+  private handleContinue() {
+    this.isGameOver = false;
+    // Clear all stuck cubes at Y_SPAWN
+    for (let i = this.cubes.length - 1; i >= 0; i--) {
+      const c = this.cubes[i];
+      if (c.y === Y_SPAWN && c.stuck) {
+        c.sprite.destroy();
+        this.cubes.splice(i, 1);
+      }
+    }
+    this.scene.resume();
+  }
+
+  // Visual Y coordinate. logicalY = 0 is bottom
+  private getVY(ly: number) {
+    const h = this.game.config.height as number;
+    return h - (ly * CELL_SIZE) - CELL_SIZE / 2;
+  }
+  
+  private getVX(lx: number) {
+    return lx * CELL_SIZE + CELL_SIZE / 2;
+  }
+
+  private spawnCube(lx: number) {
+    // Check if spawn cell is blocked by a stuck cube
+    const isBlocked = this.cubes.some(c => c.x === lx && c.y === Y_SPAWN && c.stuck);
+    if (isBlocked) return;
+
+    const container = this.add.container(this.getVX(lx), this.getVY(Y_SPAWN));
+    const sprite = this.add.graphics();
+    container.add(sprite);
+
+    const counterText = this.add.text(0, 0, '', {
+      fontSize: '16px', color: '#FFF', fontStyle: 'bold', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+    container.add(counterText);
+    
+    const randomColor = CUBE_COLORS[Math.floor(Math.random() * CUBE_COLORS.length)];
+    
+    const cube: CubeObj = {
+      x: lx,
+      y: Y_SPAWN,
+      color: randomColor,
+      stuck: false,
+      matched: false,
+      tapCount: 0,
+      lastTapTime: 0,
+      sprite: container,
+      counterText,
+    };
+
+    this.updateCubeVisuals(cube);
+    this.cubes.push(cube);
+
+    // Make it interactive
+    const hitArea = new Phaser.Geom.Rectangle(-CELL_SIZE/2, -CELL_SIZE/2, CELL_SIZE, CELL_SIZE);
+    container.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
+
+    // Make Draggable
+    this.input.setDraggable(container);
+
+    container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      // Treat as a tap if there wasn't a significant drag distance
+      if (pointer.getDistance() < 5) {
+        this.applyTap(cube);
+      }
+    });
+  }
+
+  private setupDragEvents() {
+    this.input.on('dragstart', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Container) => {
+      gameObject.setData('dragStartX', gameObject.x);
+      gameObject.setData('dragStartLx', Math.floor(gameObject.x / CELL_SIZE));
+      
+      const cube = this.cubes.find(c => c.sprite === gameObject);
+      if (cube) {
+        gameObject.setData('dragStartLy', cube.y);
+      }
+    });
+
+    this.input.on('drag', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Container, dragX: number, dragY: number) => {
+      const cube = this.cubes.find(c => c.sprite === gameObject);
+      // Can't drag if locked (y >= 8) or stuck in the stack
+      if (!cube || cube.y >= 8 || cube.stuck || cube.matched) return;
+      
+      const minX = CELL_SIZE / 2;
+      const maxX = (this.game.config.width as number) - CELL_SIZE / 2;
+      
+      // Allow vertical dragging within y=0 to y=7
+      // getVY(0) is near the bottom. getVY(7) is higher up.
+      const minY = this.getVY(7); 
+      const maxY = this.getVY(0);
+
+      gameObject.x = Phaser.Math.Clamp(dragX, minX, maxX);
+      gameObject.y = Phaser.Math.Clamp(dragY, minY, maxY);
+    });
+
+    this.input.on('dragend', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Container) => {
+      const cube = this.cubes.find(c => c.sprite === gameObject);
+      if (!cube) return;
+
+      const startLx = gameObject.getData('dragStartLx');
+      const startLy = gameObject.getData('dragStartLy');
+
+      let targetLx = Math.floor(gameObject.x / CELL_SIZE);
+      targetLx = Phaser.Math.Clamp(targetLx, 0, GRID_COLS - 1);
+
+      const h = this.game.config.height as number;
+      let targetLy = Math.round((h - gameObject.y - CELL_SIZE / 2) / CELL_SIZE);
+      targetLy = Phaser.Math.Clamp(targetLy, 0, 7);
+
+      if (cube.y >= 8 || cube.stuck || cube.matched) {
+        // If it somehow locked during dragging, snap to its actual logical X and Y
+        targetLx = cube.x; 
+        targetLy = cube.y;
+      } else {
+        // Check if the destination cell is already occupied
+        const isOccupied = this.cubes.some(c => c !== cube && c.x === targetLx && c.y === targetLy && !c.matched);
+        if (isOccupied) {
+          targetLx = startLx; // revert to original position
+          targetLy = startLy;
+        }
+      }
+
+      cube.x = targetLx;
+      cube.y = targetLy;
+      gameObject.x = this.getVX(targetLx);
+      gameObject.y = this.getVY(targetLy);
+    });
+  }
+
+  private applyTap(cube: CubeObj) {
+    if (cube.y >= 8 || cube.matched) return; // Cannot change color if locked
+    if (cube.color === 'red') return; // Cannot change color of red cube
+
+    const now = this.time.now;
+    if (now - cube.lastTapTime > RED_TAP_WINDOW) {
+      cube.tapCount = 1;
+    } else {
+      cube.tapCount++;
+    }
+    cube.lastTapTime = now;
+
+    if (cube.tapCount >= RED_TAP_THRESHOLD) {
+      cube.color = 'red';
+      cube.tapCount = 0;
+      this.cameras.main.shake(100, 0.01);
+    } else {
+      // Cycle base colors
+      const idx = CUBE_COLORS.indexOf(cube.color as any);
+      if (idx !== -1) {
+        cube.color = CUBE_COLORS[(idx + 1) % CUBE_COLORS.length];
+      }
+    }
+    
+    this.updateCubeVisuals(cube);
+    
+    // Tiny tween
+    this.tweens.add({
+      targets: cube.sprite,
+      scaleX: 1.2, scaleY: 1.2,
+      duration: 50,
+      yoyo: true
+    });
+  }
+
+  private handleInput(ptr: Phaser.Input.Pointer) {
+    // Global inputs if any
+  }
+
+  private getHexColor(color: CubeColor): number {
+    switch(color) {
+      case 'yellow': return 0xFFD700;
+      case 'blue': return 0x00CED1;
+      case 'green': return 0x32CD32;
+      case 'white': return 0xFFFFFF;
+      case 'red': return 0xFF4500;
+    }
+    return 0x000000;
+  }
+
+  private getGradientColor(color: CubeColor): number {
+    switch(color) {
+      case 'yellow': return 0xFFA500;
+      case 'blue': return 0x1E90FF;
+      case 'green': return 0x50C878;
+      case 'white': return 0xE0E0E0;
+      case 'red': return 0xDC143C;
+    }
+    return 0x000000;
+  }
+
+  private updateCubeVisuals(cube: CubeObj | FlyingCubeObj) {
+    let container: Phaser.GameObjects.Container | Phaser.GameObjects.Sprite;
+    let s: Phaser.GameObjects.Graphics;
+    
+    if ('counterText' in cube) {
+      container = cube.sprite as Phaser.GameObjects.Container;
+      s = container.getAt(0) as Phaser.GameObjects.Graphics;
+    } else {
+      s = cube.sprite as Phaser.GameObjects.Graphics;
+    }
+    s.clear();
+    
+    const hexTop = this.getHexColor(cube.color);
+    const hexBot = this.getGradientColor(cube.color);
+
+    s.fillGradientStyle(hexTop, hexTop, hexBot, hexBot, 1, 1, 1, 1);
+    s.fillRoundedRect(-CELL_SIZE/2 + 2, -CELL_SIZE/2 + 2, CELL_SIZE - 4, CELL_SIZE - 4, 8);
+
+    if (cube.color === 'red') {
+      s.lineStyle(2, 0xFFFFFF);
+      s.strokeRoundedRect(-CELL_SIZE/2 + 2, -CELL_SIZE/2 + 2, CELL_SIZE - 4, CELL_SIZE - 4, 8);
+    }
+
+    if ('counterText' in cube) {
+      if (cube.tapCount > 0 && cube.color !== 'red') {
+        cube.counterText.setText(`${cube.tapCount}/8`);
+      } else {
+        cube.counterText.setText('');
+      }
+    }
+  }
+
+  update(time: number, delta: number) {
+    if (this.isGameOver) return;
+
+    this.handleCubeSpawning(time);
+    this.handleCubeMovement(time);
+    this.handleIceSpawning(time);
+    this.handleIceMovement(time, delta);
+    this.handleCollisions();
+    this.detectMatches();
+    
+    // Check for combo timeout
+    if (this.comboTimer > 0 && time > this.comboTimer) {
+      useGameStore.getState().setCombo(1);
+      this.comboTimer = 0;
+    }
+
+    if (time > this.eventTimer + EVENT_INTERVAL) {
+      this.triggerEvent();
+      this.eventTimer = time;
+    }
+    
+    if (this.isBlizzard && time > this.blizzardEndTime) {
+      this.isBlizzard = false;
+      this.blizzardOverlay.setVisible(false);
+    }
+  }
+
+  private handleCubeSpawning(time: number) {
+    const interval = Math.max(CUBE_SPAWN_MIN_INTERVAL, CUBE_SPAWN_BASE_INTERVAL - (this.wave * 40));
+    
+    if (time > this.lastCubeSpawn + interval) {
+      this.lastCubeSpawn = time;
+      
+      // Find columns that don't have a cube at Y_SPAWN
+      const availableCols = [];
+      for (let x = 0; x < GRID_COLS; x++) {
+        if (!this.cubes.some(c => c.x === x && c.y === Y_SPAWN)) {
+          availableCols.push(x);
+        }
+      }
+
+      if (availableCols.length > 0) {
+        // Pick a random available column
+        const x = availableCols[Math.floor(Math.random() * availableCols.length)];
+        this.spawnCube(x);
+      }
+    }
+  }
+
+  private getMovingGroups(): Set<CubeObj>[] {
+    const groups: Set<CubeObj>[] = [];
+    const visited = new Set<CubeObj>();
+    const movingCubes = this.cubes.filter(c => !c.stuck && !c.matched);
+
+    for (const cube of movingCubes) {
+      if (visited.has(cube)) continue;
+      const group = new Set<CubeObj>();
+      const queue = [cube];
+      visited.add(cube);
+
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        group.add(curr);
+        
+        for (const other of movingCubes) {
+          if (!visited.has(other) && other.color === curr.color) {
+            const dx = Math.abs(curr.x - other.x);
+            const dy = Math.abs(curr.y - other.y);
+            if (dx + dy === 1) {
+              visited.add(other);
+              queue.push(other);
+            }
+          }
+        }
+      }
+      groups.push(group);
+    }
+    return groups;
+  }
+
+  private handleCubeMovement(time: number) {
+    if (time > this.lastMoveTime + 600) { // 600ms is the fast interval (half of 1200ms)
+      this.lastMoveTime = time;
+      this.moveTickCounter++;
+
+      const isSlowTick = this.moveTickCounter % 2 === 0;
+
+      // Un-stick cubes that have free space above
+      for (const cube of this.cubes) {
+        if (cube.stuck) {
+          const nextY = cube.y + 1;
+          if (nextY >= GRID_ROWS) continue; // Do not unstick cubes at the very top
+
+          const blockedByCube = this.cubes.some(c => c.y === nextY && c.x === cube.x && c.stuck);
+          const blockedByIce = this.flyingCubes.some(i => i.y === nextY && Math.floor(i.x / CELL_SIZE) === cube.x);
+          
+          if (!blockedByCube && !blockedByIce) {
+            cube.stuck = false;
+          }
+        }
+      }
+
+      const groups = this.getMovingGroups();
+      const wantsToMove = new Set<CubeObj>();
+
+      for (const group of groups) {
+        let isFast = true;
+        for (const c of group) {
+          if (c.y < 8) {
+            isFast = false;
+            break;
+          }
+        }
+
+        const canMoveThisTick = isFast || isSlowTick;
+        if (canMoveThisTick) {
+          for (const c of group) {
+            wantsToMove.add(c);
+          }
+        }
+      }
+
+      let newlyStuck = false;
+
+      // Sort all moving cubes by Y descending (top first)
+      const sortedCubes = this.cubes.filter(c => !c.stuck && !c.matched).sort((a, b) => b.y - a.y);
+
+      for (const cube of sortedCubes) {
+        if (!wantsToMove.has(cube)) continue;
+
+        const nextY = cube.y + 1;
+        
+        if (nextY >= GRID_ROWS - 1) {
+          cube.y = nextY;
+          cube.stuck = true;
+          newlyStuck = true;
+          this.tweens.add({
+            targets: cube.sprite,
+            y: this.getVY(nextY),
+            duration: 150,
+            ease: 'Sine.easeOut'
+          });
+          continue;
+        }
+
+        // Check if nextY is occupied by another cube
+        const obstacle = this.cubes.find(c => c.x === cube.x && c.y === nextY && !c.matched);
+        
+        if (obstacle) {
+          if (obstacle.stuck) {
+            cube.stuck = true;
+            newlyStuck = true;
+          }
+          // If obstacle is not stuck, we just don't move this tick.
+        } else {
+          // Move
+          cube.y = nextY;
+          this.tweens.add({
+            targets: cube.sprite,
+            y: this.getVY(nextY),
+            duration: 150,
+            ease: 'Sine.easeOut'
+          });
+        }
+      }
+
+      if (newlyStuck) {
+        this.cameras.main.shake(50, 0.005);
+        this.checkGameOver();
+      }
+    }
+  }
+
+
+
+  private triggerBlizzard() {
+    this.isBlizzard = true;
+    this.blizzardEndTime = this.time.now + 10000;
+    this.blizzardOverlay.setVisible(true);
+    // TODO: Particles
+  }
+
+  private handleIceSpawning(time: number) {
+    let interval = this.flyingInterval;
+    if (this.isBlizzard) interval *= 0.5;
+
+    if (time > this.lastFlyingSpawn + interval) {
+      this.lastFlyingSpawn = time;
+      
+      const dir = Math.random() > 0.5 ? 1 : -1;
+      const x = dir === 1 ? -CELL_SIZE : this.game.config.width as number + CELL_SIZE;
+      
+      // Random row
+      const y = Math.floor(Math.random() * (Y_ICE_MAX - Y_ICE_MIN + 1)) + Y_ICE_MIN;
+      
+      const randomColor = CUBE_COLORS[Math.floor(Math.random() * CUBE_COLORS.length)];
+      
+      const sprite = this.add.graphics();
+      sprite.x = x;
+      sprite.y = this.getVY(y);
+      
+      const flyingCube: FlyingCubeObj = {
+        x, y, color: randomColor, sprite, dir, speed: this.flyingSpeed * CELL_SIZE, matched: false
+      };
+      
+      this.updateCubeVisuals(flyingCube);
+
+      this.flyingCubes.push(flyingCube);
+    }
+  }
+
+  private handleIceMovement(time: number, delta: number) {
+    const dt = delta / 1000;
+    for (let i = this.flyingCubes.length - 1; i >= 0; i--) {
+      const fc = this.flyingCubes[i];
+      if (fc.matched) continue;
+      fc.x += fc.speed * fc.dir * dt;
+      fc.sprite.x = fc.x;
+      
+      if (fc.x < -CELL_SIZE*2 || fc.x > (this.game.config.width as number) + CELL_SIZE*2) {
+        fc.sprite.destroy();
+        this.flyingCubes.splice(i, 1);
+      }
+    }
+  }
+  private handleCollisions() {
+    for (let i = this.flyingCubes.length - 1; i >= 0; i--) {
+      const fc = this.flyingCubes[i];
+      if (fc.matched) continue;
+      const fcLx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(fc.x / CELL_SIZE)));
+      
+      for (let j = this.cubes.length - 1; j >= 0; j--) {
+        const cube = this.cubes[j];
+        if (cube.y === fc.y && cube.x === fcLx) {
+          this.resolveCollision(cube, fc, i);
+          break; // One collision per cube
+        }
+      }
+    }
+    this.detectMatches();
+  }
+
+  private resolveCollision(cube: CubeObj, fc: FlyingCubeObj, fcIndex: number) {
+    // Both stop and fc joins the cubes array
+    fc.sprite.destroy();
+    this.flyingCubes.splice(fcIndex, 1);
+    
+    // Check if cube is moving
+    if (!cube.stuck) {
+      cube.stuck = true;
+      this.cameras.main.shake(100, 0.001);
+      this.checkGameOver();
+    }
+    
+    // Create new stuck cube where fc was
+    const newLx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(fc.x / CELL_SIZE)));
+    // We shouldn't necessarily spawn a new cube. The FC becomes stuck? No, PRD says:
+    // "Flying cube stops at collision point. Stopped flying cube becomes part of grid"
+    
+    // Instead of creating a new CubeObj, we can just convert it
+    const container = this.add.container(this.getVX(newLx), this.getVY(fc.y));
+    const sprite = this.add.graphics();
+    container.add(sprite);
+
+    const counterText = this.add.text(0, 0, '', {
+      fontSize: '16px', color: '#FFF', fontStyle: 'bold', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+    container.add(counterText);
+    
+    const newCube: CubeObj = {
+      x: newLx,
+      y: fc.y,
+      color: fc.color,
+      stuck: true,
+      matched: false,
+      tapCount: 0,
+      lastTapTime: 0,
+      sprite: container,
+      counterText,
+    };
+    
+    this.updateCubeVisuals(newCube);
+    this.cubes.push(newCube);
+
+    const hitArea = new Phaser.Geom.Rectangle(-CELL_SIZE/2, -CELL_SIZE/2, CELL_SIZE, CELL_SIZE);
+    container.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
+
+    this.input.setDraggable(container);
+
+    container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.getDistance() < 5) {
+        this.applyTap(newCube);
+      }
+    });
+    
+    this.cameras.main.shake(100, 0.001);
+    this.checkGameOver();
+  }
+
+  private detectMatches() {
+    const validCubes = this.cubes.filter(c => !c.matched && c.y >= 8); // ONLY check y >= 8
+    if (validCubes.length === 0 && this.flyingCubes.length === 0) return;
+
+    const toDestroy = new Set<CubeObj | FlyingCubeObj>();
+    const grid: (CubeObj | FlyingCubeObj | null)[][] = Array(GRID_COLS).fill(null).map(() => Array(GRID_ROWS).fill(null));
+    
+    validCubes.forEach(c => {
+      if (c.x >= 0 && c.x < GRID_COLS && c.y >= 0 && c.y < GRID_ROWS) {
+        grid[c.x][c.y] = c;
+      }
+    });
+
+    // Add flying cubes to the grid for horizontal matching only
+    const validFlyingCubes = this.flyingCubes.filter(c => !c.matched);
+    validFlyingCubes.forEach(fc => {
+      const fcLx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(fc.x / CELL_SIZE)));
+      if (fc.y >= 0 && fc.y < GRID_ROWS && !grid[fcLx][fc.y]) {
+        grid[fcLx][fc.y] = fc;
+      }
+    });
+
+    // Horizontal
+    for (let y = 8; y < GRID_ROWS; y++) {
+      for (let x = 0; x <= GRID_COLS - 3; x++) {
+        let matchLen = 1;
+        let baseColor: CubeColor | null = grid[x][y]?.color === 'red' ? null : (grid[x][y]?.color ?? null);
+        if (!grid[x][y]) continue;
+
+        let curX = x + 1;
+        while (curX < GRID_COLS) {
+          const c = grid[curX][y];
+          if (!c) break;
+          
+          if (c.color !== 'red') {
+            if (!baseColor) {
+              baseColor = c.color;
+            } else if (baseColor !== c.color) {
+              break;
+            }
+          }
+          matchLen++;
+          curX++;
+        }
+
+        if (matchLen >= 3) {
+          for (let i = 0; i < matchLen; i++) {
+            toDestroy.add(grid[x + i][y]!);
+          }
+        }
+      }
+    }
+
+    // Vertical
+    for (let x = 0; x < GRID_COLS; x++) {
+      for (let y = 8; y <= GRID_ROWS - 3; y++) {
+        let matchLen = 1;
+        let baseColor: CubeColor | null = grid[x][y]?.color === 'red' ? null : (grid[x][y]?.color ?? null);
+        if (!grid[x][y]) continue;
+
+        let curY = y + 1;
+        while (curY < GRID_ROWS) {
+          const c = grid[x][curY];
+          if (!c) break;
+          
+          if (c.color !== 'red') {
+            if (!baseColor) {
+              baseColor = c.color;
+            } else if (baseColor !== c.color) {
+              break;
+            }
+          }
+          matchLen++;
+          curY++;
+        }
+
+        if (matchLen >= 3) {
+          for (let i = 0; i < matchLen; i++) {
+            toDestroy.add(grid[x][y + i]!);
+          }
+        }
+      }
+    }
+
+    if (toDestroy.size > 0) {
+      this.resolveMatches(Array.from(toDestroy));
+    }
+  }
+
+  private resolveMatches(cubes: (CubeObj | FlyingCubeObj)[]) {
+    const size = cubes.length;
+    let basePts = 0;
+    if (size === 3) basePts = 30;
+    else if (size === 4) basePts = 60;
+    else if (size === 5) basePts = 100;
+    else if (size === 6) basePts = 150;
+    else basePts = 200 + (size - 7) * 50;
+
+    const redCount = cubes.filter(c => c.color === 'red').length;
+    basePts += redCount * 20;
+
+    const store = useGameStore.getState();
+    this.score += basePts * store.combo;
+    store.addScore(basePts); // internally * combo
+    
+    // Increase combo
+    let nextCombo = store.combo;
+    if (store.combo === 1) nextCombo = 1.5;
+    else if (store.combo === 1.5) nextCombo = 2.0;
+    else if (store.combo >= 2.0) nextCombo = 2.5;
+    
+    store.setCombo(nextCombo);
+    this.comboTimer = this.time.now + 3000;
+
+    cubes.forEach(c => {
+      c.matched = true;
+      // Start blinking outline effect
+      this.tweens.add({
+        targets: c.sprite,
+        alpha: 0.2,
+        yoyo: true,
+        repeat: 3,
+        duration: 125,
+      });
+    });
+
+    this.time.delayedCall(500, () => {
+      cubes.forEach(c => {
+        c.sprite.destroy();
+        if ('stuck' in c) {
+          const idx = this.cubes.indexOf(c as CubeObj);
+          if (idx !== -1) this.cubes.splice(idx, 1);
+        } else {
+          const idx = this.flyingCubes.indexOf(c as FlyingCubeObj);
+          if (idx !== -1) this.flyingCubes.splice(idx, 1);
+        }
+      });
+      this.cameras.main.shake(200, 0.006);
+    });
+
+    // Wave progression based on score
+    const newWave = Math.floor(this.score / 500) + 1;
+    if (newWave > this.wave) {
+      this.wave = newWave;
+      store.setWave(this.wave);
+      
+      this.flyingSpeed = BASE_ICE_SPEED + (this.wave * ICE_SPEED_WAVE_INC);
+      this.flyingInterval = Math.max(MIN_ICE_SPAWN_INTERVAL, BASE_ICE_SPAWN_INTERVAL - (this.wave * ICE_SPAWN_WAVE_DEC));
+      
+      if (this.wave % 10 === 0) {
+        this.triggerBlizzard();
+      }
+    }
+  }
+
+  private triggerEvent() {
+    const events = ['colorSurge', 'slowdown'];
+    const r = events[Math.floor(Math.random() * events.length)];
+    
+    const w = this.game.config.width as number;
+    const h = this.game.config.height as number;
+    const text = this.add.text(w/2, h/2, r === 'colorSurge' ? 'COLOR SURGE!' : 'ICE SLOWDOWN!', { 
+      fontSize: '48px', color: '#FFD700', fontStyle: 'bold', stroke: '#000', strokeThickness: 6 
+    }).setOrigin(0.5);
+    
+    this.tweens.add({ 
+      targets: text, y: text.y - 100, alpha: 0, duration: 2000, 
+      onComplete: () => text.destroy() 
+    });
+
+    if (r === 'colorSurge') {
+      this.cameras.main.flash(500, 255, 136, 0);
+      const targetColor = CUBE_COLORS[Math.floor(Math.random() * CUBE_COLORS.length)];
+      this.cubes.forEach(c => {
+        if (c.color !== 'red') {
+          c.color = targetColor;
+          this.updateCubeVisuals(c);
+        }
+      });
+    } else if (r === 'slowdown') {
+      const oldSpeed = this.flyingSpeed;
+      this.flyingSpeed *= 0.5;
+      this.blizzardOverlay.setVisible(true);
+      this.time.delayedCall(5000, () => {
+        this.flyingSpeed = oldSpeed;
+        if (!this.isBlizzard) this.blizzardOverlay.setVisible(false);
+      });
+    }
+  }
+
+  private checkGameOver() {
+    let blockedCount = 0;
+    for(let x=0; x<GRID_COLS; x++) {
+      if(this.cubes.some(c => c.x === x && c.y === Y_SPAWN && c.stuck)) {
+        blockedCount++;
+      }
+    }
+    if (blockedCount >= GRID_COLS) {
+      this.triggerGameOver();
+    }
+  }
+
+  private triggerGameOver() {
+    if (this.isGameOver) return;
+    this.isGameOver = true;
+    
+    if (useGameStore.getState().gameState !== 'playing') {
+      this.time.delayedCall(1000, () => {
+        this.scene.restart();
+      });
+      return;
+    }
+
+    this.cameras.main.shake(500, 0.03);
+    
+    // Slowdown effect then game over
+    this.time.delayedCall(1000, () => {
+      useGameStore.getState().setGameState('gameover');
+      
+      const { wave, score } = useGameStore.getState();
+      useUserStore.getState().updateBest(wave, score);
+      useUserStore.getState().addHeatPoints(score);
+      
+      EventBus.emit('game-over');
+      this.scene.pause();
+    });
+  }
+}
+
+```

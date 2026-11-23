@@ -1,0 +1,157 @@
+#!/bin/bash
+DOCS="/workspace/app-b9zgi9o6r9q9/docs"
+ROOT="/workspace/app-b9zgi9o6r9q9"
+
+# 1. Setup & Config
+FILE1="$DOCS/01_Project_Setup_and_Config.md"
+cat << 'MD_EOF' > "$FILE1"
+# Heat Rush 2.0 - Source Code Export
+
+## Part 1: Project Overview & Setup
+
+### Recommendations for the Developer
+1. Install **Node.js** (v18+) and **npm/pnpm**.
+2. Run `npm install` or `pnpm install` in the project root to install dependencies.
+3. Configure the Supabase instance using the SQL files and edge functions (see Part 4).
+4. Create a `.env` file at the root with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+5. Run `npm run dev` to start the development server.
+6. Run `npm run build` to build for production.
+
+### Project File Tree
+```
+Heat Rush 2.0
+├── src/
+│   ├── components/
+│   │   ├── GameUI.tsx
+│   │   ├── Leaderboard.tsx
+│   │   ├── Login.tsx
+│   │   ├── MainMenu.tsx
+│   │   ├── PhaserGame.tsx
+│   │   ├── Settings.tsx
+│   │   └── Shop.tsx
+│   ├── db/
+│   │   └── supabase.ts
+│   ├── game/
+│   │   ├── scenes/
+│   │   │   ├── Boot.ts
+│   │   │   └── MainGame.ts
+│   │   ├── constants.ts
+│   │   ├── EventBus.ts
+│   │   ├── main.ts
+│   │   └── utils.ts
+│   ├── lib/
+│   │   └── supabase.ts
+│   ├── store/
+│   │   ├── useGameStore.ts
+│   │   └── useUserStore.ts
+│   ├── App.tsx
+│   ├── index.css
+│   ├── main.tsx
+│   ├── svg.d.ts
+│   └── vite-env.d.ts
+├── supabase/
+│   ├── functions/
+│   │   ├── create_stripe_checkout/
+│   │   │   └── index.ts
+│   │   └── verify_stripe_payment/
+│   │       └── index.ts
+│   └── migrations/
+│       └── 00001_001_init.sql
+├── index.html
+├── package.json
+├── tailwind.config.js
+├── postcss.config.js
+├── vite.config.ts
+├── tsconfig.json
+├── tsconfig.app.json
+├── tsconfig.node.json
+└── biome.json
+```
+
+## Root Configuration Files
+
+MD_EOF
+
+for file in index.html package.json tailwind.config.js postcss.config.js vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json biome.json; do
+  echo "### File: \`$file\`" >> "$FILE1"
+  ext="${file##*.}"
+  lang="text"
+  [ "$ext" = "ts" ] && lang="ts"
+  [ "$ext" = "js" ] && lang="js"
+  [ "$ext" = "json" ] && lang="json"
+  [ "$ext" = "html" ] && lang="html"
+  echo "\`\`\`$lang" >> "$FILE1"
+  cat "$ROOT/$file" >> "$FILE1"
+  echo "" >> "$FILE1"
+  echo "\`\`\`" >> "$FILE1"
+  echo "" >> "$FILE1"
+done
+
+# 2. React Components & Store
+FILE2="$DOCS/02_React_App_Store_Components.md"
+cat << 'MD_EOF' > "$FILE2"
+# Heat Rush 2.0 - React App, Store, and UI Components
+
+## Core React Application Files
+
+MD_EOF
+
+REACT_FILES="src/main.tsx src/App.tsx src/index.css src/vite-env.d.ts src/svg.d.ts src/lib/supabase.ts src/db/supabase.ts src/store/useGameStore.ts src/store/useUserStore.ts src/components/GameUI.tsx src/components/Leaderboard.tsx src/components/Login.tsx src/components/MainMenu.tsx src/components/PhaserGame.tsx src/components/Settings.tsx src/components/Shop.tsx"
+
+for file in $REACT_FILES; do
+  echo "### File: \`$file\`" >> "$FILE2"
+  ext="${file##*.}"
+  lang="tsx"
+  [ "$ext" = "ts" ] && lang="ts"
+  [ "$ext" = "css" ] && lang="css"
+  echo "\`\`\`$lang" >> "$FILE2"
+  cat "$ROOT/$file" >> "$FILE2"
+  echo "" >> "$FILE2"
+  echo "\`\`\`" >> "$FILE2"
+  echo "" >> "$FILE2"
+done
+
+# 3. Game Engine Core
+FILE3="$DOCS/03_Game_Engine_Core.md"
+cat << 'MD_EOF' > "$FILE3"
+# Heat Rush 2.0 - Phaser Game Logic
+
+## Game Engine Core Files
+
+MD_EOF
+
+GAME_FILES="src/game/main.ts src/game/constants.ts src/game/EventBus.ts src/game/utils.ts src/game/scenes/Boot.ts src/game/scenes/MainGame.ts"
+
+for file in $GAME_FILES; do
+  echo "### File: \`$file\`" >> "$FILE3"
+  echo "\`\`\`ts" >> "$FILE3"
+  cat "$ROOT/$file" >> "$FILE3"
+  echo "" >> "$FILE3"
+  echo "\`\`\`" >> "$FILE3"
+  echo "" >> "$FILE3"
+done
+
+# 4. Supabase Backend
+FILE4="$DOCS/04_Supabase_Backend.md"
+cat << 'MD_EOF' > "$FILE4"
+# Heat Rush 2.0 - Supabase Configuration & Edge Functions
+
+## Supabase Backend & Database Schema
+
+MD_EOF
+
+SBASE_FILES="supabase/migrations/00001_001_init.sql supabase/functions/create_stripe_checkout/index.ts supabase/functions/verify_stripe_payment/index.ts"
+
+for file in $SBASE_FILES; do
+  echo "### File: \`$file\`" >> "$FILE4"
+  ext="${file##*.}"
+  lang="ts"
+  [ "$ext" = "sql" ] && lang="sql"
+  echo "\`\`\`$lang" >> "$FILE4"
+  cat "$ROOT/$file" >> "$FILE4"
+  echo "" >> "$FILE4"
+  echo "\`\`\`" >> "$FILE4"
+  echo "" >> "$FILE4"
+done
+
+chmod +x "$ROOT/docs/export_script.sh"
